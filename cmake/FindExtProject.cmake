@@ -157,6 +157,9 @@ function(find_extproject name)
     if(CMAKE_GENERATOR)        
         list(APPEND find_extproject_CMAKE_ARGS -DCMAKE_GENERATOR=${CMAKE_GENERATOR})    
     endif()
+    if(CMAKE_MAKE_PROGRAM)
+        list(APPEND find_extproject_CMAKE_ARGS -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM})
+    endif()
     if(CMAKE_BUILD_TYPE)
         list(APPEND find_extproject_CMAKE_ARGS -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE})
     endif()        
@@ -164,6 +167,9 @@ function(find_extproject name)
     if(CMAKE_GENERATOR_TOOLSET)
         list(APPEND find_extproject_CMAKE_ARGS -DCMAKE_GENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET})
     endif() 
+    if(SKIP_GIT_PULL)
+        list(APPEND find_extproject_CMAKE_ARGS -DSKIP_GIT_PULL=${SKIP_GIT_PULL})    
+    endif()
 
     get_cmake_property(_variableNames VARIABLES)
     string (REGEX MATCHALL "(^|;)WITH_[A-Za-z0-9_]*" _matchedVars "${_variableNames}") 
@@ -185,7 +191,7 @@ function(find_extproject name)
     endif()
        
     include(ExternalProject)
-   
+
     # create delete build file script and custom command to periodically execute it
     file(WRITE ${EP_PREFIX}/tmp/${name}_EP-checkupdate.cmake
         "file(TIMESTAMP ${EXT_STAMP_DIR}/${name}_EP-gitpull.txt LAST_PULL \"%y%j%H%M\" UTC)
@@ -195,27 +201,40 @@ function(find_extproject name)
          string(TIMESTAMP CURRENT_TIME \"%y%j%H%M\" UTC)
          math(EXPR DIFF_TIME \"\${CURRENT_TIME} - \${LAST_PULL}\")
          if(DIFF_TIME GREATER ${PULL_UPDATE_PERIOD})
-            message(STATUS \"Remove ${name}_EP-build\")
-            file(REMOVE ${EXT_STAMP_DIR}/${name}_EP-build)
+            message(STATUS \"Git pull ${repo_name} ...\")
+            execute_process(COMMAND ${GIT_EXECUTABLE} pull
+               WORKING_DIRECTORY  ${EP_PREFIX}/src/${name}_EP
+               TIMEOUT ${PULL_TIMEOUT} OUTPUT_VARIABLE OUT_STR)
+
+            if(OUT_STR)
+                string(FIND \${OUT_STR} \"Already up-to-date\" STR_POS)
+                if(STR_POS LESS 0)
+                    message(STATUS \"Remove ${name}_EP-build\")
+                    file(REMOVE ${EXT_STAMP_DIR}/${name}_EP-build)
+                endif()
+                file(WRITE ${EXT_STAMP_DIR}/${name}_EP-gitpull.txt \"\")
+            endif()
          endif()")
-                  
+
     ExternalProject_Add(${name}_EP
         GIT_REPOSITORY ${EP_URL}/${repo_name}
         CMAKE_ARGS ${find_extproject_CMAKE_ARGS}
         UPDATE_DISCONNECTED 1
     )
-    
-    add_custom_command(TARGET ${name}_EP PRE_BUILD
-               COMMAND ${CMAKE_COMMAND} -P ${EP_PREFIX}/tmp/${name}_EP-checkupdate.cmake
-               COMMENT "Check if update needed ..."               
-               VERBATIM)
-    
+
+    if(NOT SKIP_GIT_PULL)
+        add_custom_command(TARGET ${name}_EP PRE_BUILD
+                   COMMAND ${CMAKE_COMMAND} -P ${EP_PREFIX}/tmp/${name}_EP-checkupdate.cmake
+                   COMMENT "Check if update needed ..."
+                   VERBATIM)
+    endif()
+
     set(RECONFIGURE OFF)
     set(INCLUDE_EXPORT_PATH "${EXT_BUILD_DIR}/${repo_project}-exports.cmake") 
 
     if(NOT EXISTS "${EP_PREFIX}/src/${name}_EP/.git")
         color_message("Git clone ${repo_name} ...")
-        
+
         set(error_code 1)
         set(number_of_tries 0)
         while(error_code AND number_of_tries LESS 3)
@@ -226,8 +245,8 @@ function(find_extproject name)
             )
           math(EXPR number_of_tries "${number_of_tries} + 1")
         endwhile()
-           
-        if(error_code)   
+
+        if(error_code)
             message(FATAL_ERROR "Failed to clone repository: ${EP_URL}/${repo_name}")
             return()
         else()
@@ -238,14 +257,14 @@ function(find_extproject name)
             #    ${find_extproject_CMAKE_ARGS}
             #    WORKING_DIRECTORY ${EXT_BUILD_DIR})
             set(RECONFIGURE ON)
-        endif()   
-    else() 
+        endif()
+    else()
         if(EXISTS ${INCLUDE_EXPORT_PATH})
             check_updates(${EXT_STAMP_DIR}/${name}_EP-gitpull.txt ${PULL_UPDATE_PERIOD} CHECK_UPDATES)
         else()
             set(RECONFIGURE ON)
         endif()
-        if(CHECK_UPDATES)
+        if(CHECK_UPDATES AND NOT SKIP_GIT_PULL)
             color_message("Git pull ${repo_name} ...")
             execute_process(COMMAND ${GIT_EXECUTABLE} pull
                WORKING_DIRECTORY  ${EP_PREFIX}/src/${name}_EP
@@ -258,8 +277,8 @@ function(find_extproject name)
                 endif()
                 file(WRITE ${EXT_STAMP_DIR}/${name}_EP-gitpull.txt "")
             endif()
-        endif()        
-    endif() 
+        endif()
+    endif()
 
     if(RECONFIGURE)
         color_message("Configure ${repo_name} ...")
@@ -292,12 +311,16 @@ function(find_extproject name)
         unset(INCLUDE_EXPORT_PATH)
     endif()
     
-    add_dependencies(${IMPORTED_TARGETS} ${name}_EP)  
+    add_dependencies(${IMPORTED_TARGETS} ${name}_EP)  # TODO: IMPORTED_TARGETS is list !!!
     
     set(DEPENDENCY_LIB ${DEPENDENCY_LIB} ${IMPORTED_TARGETS} PARENT_SCOPE) 
     
     set(IMPORTED_TARGET_PATH)
+
     foreach(IMPORTED_TARGET ${IMPORTED_TARGETS})
+        if(${repo_header_only})
+            continue()
+        endif()
         set(IMPORTED_TARGET_PATH ${IMPORTED_TARGET_PATH} $<TARGET_LINKER_FILE:${IMPORTED_TARGET}>) #${IMPORTED_TARGET}
         if(NOT find_extproject_SHARED)
             get_target_property(LINK_INTERFACE_LIBS "${IMPORTED_TARGET}" INTERFACE_LINK_LIBRARIES)
@@ -330,6 +353,12 @@ function(find_extproject name)
     else()
         set(_INST_ROOT_PATH ${CMAKE_INSTALL_PREFIX})
     endif()
+    
+    # create directories
+    file(MAKE_DIRECTORY "${EXT_INSTALL_DIR}/bin")
+    file(MAKE_DIRECTORY "${EXT_INSTALL_DIR}/lib")
+    file(MAKE_DIRECTORY "${EXT_INSTALL_DIR}/include")
+    file(MAKE_DIRECTORY "${EXT_INSTALL_DIR}/share")
     
     install( DIRECTORY ${EXT_INSTALL_DIR}/bin
              DESTINATION ${_INST_ROOT_PATH}
