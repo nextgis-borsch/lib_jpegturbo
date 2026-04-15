@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15...3.28)
+cmake_minimum_required(VERSION 3.16.3)
 
 if(CMAKE_EXECUTABLE_SUFFIX)
   set(CMAKE_EXECUTABLE_SUFFIX_TMP ${CMAKE_EXECUTABLE_SUFFIX})
@@ -13,8 +13,17 @@ if(CMAKE_C_FLAGS_RELWITHDEBINFO)
   set(CMAKE_C_FLAGS_RELWITHDEBINFO_INITIALIZED_TO_DEFAULT 0)
 endif()
 
-project(libjpeg-turbo C)
 set(VERSION 3.1.90)
+
+project(libjpeg-turbo 
+  VERSION ${VERSION}
+  LANGUAGES C
+)
+
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/borsch/cmake/version.cmake)
+report_version(${PROJECT_NAME} ${PROJECT_VERSION})
+write_version(${CMAKE_CURRENT_SOURCE_DIR}/ChangeLog.md ${PROJECT_VERSION_MAJOR} ${PROJECT_VERSION_MINOR} ${PROJECT_VERSION_PATCH})
+
 set(COPYRIGHT_YEAR "1991-2026")
 string(REPLACE "." ";" VERSION_TRIPLET ${VERSION})
 list(GET VERSION_TRIPLET 0 VERSION_MAJOR)
@@ -157,47 +166,7 @@ message(STATUS "${BITS}-bit build (${CPU_TYPE})")
 ###############################################################################
 # INSTALL DIRECTORIES
 ###############################################################################
-
-if(WIN32)
-  if(MSVC_LIKE)
-    set(CMAKE_INSTALL_DEFAULT_PREFIX "c:/${CMAKE_PROJECT_NAME}")
-  else()
-    set(CMAKE_INSTALL_DEFAULT_PREFIX "c:/${CMAKE_PROJECT_NAME}-gcc")
-  endif()
-  if(BITS EQUAL 64)
-    set(CMAKE_INSTALL_DEFAULT_PREFIX "${CMAKE_INSTALL_DEFAULT_PREFIX}64")
-  endif()
-else()
-  if(NOT CMAKE_INSTALL_DEFAULT_PREFIX)
-    set(CMAKE_INSTALL_DEFAULT_PREFIX /opt/${CMAKE_PROJECT_NAME})
-  endif()
-endif()
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set(CMAKE_INSTALL_PREFIX "${CMAKE_INSTALL_DEFAULT_PREFIX}" CACHE PATH
-    "Directory into which to install ${CMAKE_PROJECT_NAME} (default: ${CMAKE_INSTALL_DEFAULT_PREFIX})"
-    FORCE)
-endif()
-message(STATUS "CMAKE_INSTALL_PREFIX = ${CMAKE_INSTALL_PREFIX}")
-
-# When the prefix is /opt/${CMAKE_PROJECT_NAME}, we assume that an "official"
-# build is being created, and thus we install things into specific locations.
-
-if(CMAKE_INSTALL_PREFIX STREQUAL "${CMAKE_INSTALL_DEFAULT_PREFIX}")
-  set(CMAKE_INSTALL_DEFAULT_DATAROOTDIR "")
-  set(CMAKE_INSTALL_DEFAULT_DOCDIR "<CMAKE_INSTALL_DATAROOTDIR>/doc")
-  set(CMAKE_INSTALL_DEFAULT_JAVADIR "<CMAKE_INSTALL_DATAROOTDIR>/classes")
-  if(UNIX AND NOT APPLE)
-    if(BITS EQUAL 64)
-      set(CMAKE_INSTALL_DEFAULT_LIBDIR "lib64")
-    elseif(CMAKE_C_COMPILER_ABI MATCHES "ELF X32")
-      set(CMAKE_INSTALL_DEFAULT_LIBDIR "libx32")
-    else()
-      set(CMAKE_INSTALL_DEFAULT_LIBDIR "lib32")
-    endif()
-  endif()
-endif()
-
-include(cmakescripts/GNUInstallDirs.cmake)
+include(GNUInstallDirs)
 
 macro(report_directory var)
   if(CMAKE_INSTALL_${var} STREQUAL CMAKE_INSTALL_FULL_${var})
@@ -238,7 +207,7 @@ endmacro()
 
 option(ENABLE_SHARED "Build shared libraries" TRUE)
 boolean_number(ENABLE_SHARED)
-option(ENABLE_STATIC "Build static libraries" TRUE)
+option(ENABLE_STATIC "Build static libraries" OFF)
 boolean_number(ENABLE_STATIC)
 option(REQUIRE_SIMD
   "Generate a fatal error if SIMD extensions are not available for this platform (default is to fall back to a non-SIMD build)"
@@ -1946,11 +1915,6 @@ set(EXE ${CMAKE_EXECUTABLE_SUFFIX})
 
 if(WITH_TURBOJPEG)
   if(ENABLE_SHARED)
-    install(TARGETS turbojpeg EXPORT ${CMAKE_PROJECT_NAME}Targets
-      INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-      ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT lib
-      LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT lib
-      RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT bin)
     if(WITH_TOOLS)
       install(TARGETS tjbench
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT bin)
@@ -2008,29 +1972,6 @@ if(WITH_TOOLS)
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT bin)
 endif()
 
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/README.ijg
-  ${CMAKE_CURRENT_SOURCE_DIR}/README.md
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/example.c
-  ${CMAKE_CURRENT_SOURCE_DIR}/doc/libjpeg.txt
-  ${CMAKE_CURRENT_SOURCE_DIR}/doc/structure.txt
-  ${CMAKE_CURRENT_SOURCE_DIR}/doc/usage.txt
-  ${CMAKE_CURRENT_SOURCE_DIR}/doc/wizard.txt
-  ${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md
-  DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT doc)
-if(WITH_TURBOJPEG)
-  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/tjcomp.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/tjdecomp.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/tjtran.c
-    DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT doc)
-endif()
-if(WITH_JNA)
-  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/jna/TJ.java
-    ${CMAKE_CURRENT_SOURCE_DIR}/jna/TJComp.java
-    ${CMAKE_CURRENT_SOURCE_DIR}/jna/TJDecomp.java
-    ${CMAKE_CURRENT_SOURCE_DIR}/jna/TJTran.java
-    DESTINATION ${CMAKE_INSTALL_DOCDIR}/jna COMPONENT doc)
-endif()
-
 if(UNIX OR MINGW)
   if(WITH_TOOLS)
     install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/doc/cjpeg.1
@@ -2047,25 +1988,15 @@ if(WITH_TURBOJPEG)
   install(FILES ${CMAKE_CURRENT_BINARY_DIR}/pkgscripts/libturbojpeg.pc
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig COMPONENT lib)
 endif()
-install(FILES
-  ${CMAKE_CURRENT_BINARY_DIR}/pkgscripts/${CMAKE_PROJECT_NAME}Config.cmake
-  ${CMAKE_CURRENT_BINARY_DIR}/pkgscripts/${CMAKE_PROJECT_NAME}ConfigVersion.cmake
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CMAKE_PROJECT_NAME}
-  COMPONENT lib)
-install(EXPORT ${CMAKE_PROJECT_NAME}Targets
-  NAMESPACE ${CMAKE_PROJECT_NAME}::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${CMAKE_PROJECT_NAME}
-  COMPONENT lib)
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/jconfig.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/jerror.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/jmorecfg.h
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/jpeglib.h
-  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT include)
-
-include(cmakescripts/BuildPackages.cmake)
-
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/cmakescripts/cmake_uninstall.cmake.in"
-  "cmake_uninstall.cmake" IMMEDIATE @ONLY)
-
-add_custom_target(uninstall COMMAND ${CMAKE_COMMAND} -P cmake_uninstall.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/borsch/cmake/packaging.cmake)
+create_borsch_package(${PROJECT_NAME}
+  VENDOR NextGIS
+  VERSION ${PROJECT_VERSION}
+  TARGETS turbojpeg jpeg
+  HEADERS
+    ${CMAKE_CURRENT_BINARY_DIR}/jconfig.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/jerror.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/jmorecfg.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/jpeglib.h
+)
